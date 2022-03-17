@@ -11,7 +11,9 @@
 
 enum CMD {
 	CMD_LOGIN,
-	CMD_LOGINOUT,
+	CMD_LOGIN_RESULT,
+	CMD_LOGOUT,
+	CMD_LOGOUT_RESULT,
 	CMD_ERROR
 };
 
@@ -20,21 +22,39 @@ struct DataHeader {
 	short cmd;
 };
 
-struct LoginResult {
-	int result;
-};
-
-struct LoginOutResult {
-	int result;
-};
-
-struct LoginOut {
+struct LogOut : public DataHeader {
+	LogOut() {
+		dataLength = sizeof(LogOut);
+		cmd = CMD_LOGOUT;
+	}
 	char userName[32];
 };
 
-struct Login {
+struct LogOutResult : public DataHeader {
+	LogOutResult() {
+		dataLength = sizeof(LogOutResult);
+		cmd = CMD_LOGOUT_RESULT;
+		result = 0;
+	}
+	int result;
+};
+
+struct Login : public DataHeader {
+	Login() {
+		dataLength = sizeof(Login);
+		cmd = CMD_LOGIN;
+	}
 	char userName[32];
 	char passWord[32];
+};
+
+struct LoginResult : public DataHeader {
+	LoginResult() {
+		dataLength = sizeof(LoginResult);
+		cmd = CMD_LOGIN_RESULT;
+		result = 0;
+	}
+	int result;
 };
 
 int main() {
@@ -70,26 +90,21 @@ int main() {
 			break;
 		}
 		else if (0 == strcmp(cmdBuf, "login")) {
-			Login login = { "zzr", "999" };
-			DataHeader dh = { sizeof(login), CMD_LOGIN};
-			send(_sock, (const char*)&dh, sizeof(dh), 0);
+			Login login;
+			strcpy(login.userName, "zzr");
+			strcpy(login.passWord, "999");
 			send(_sock, (const char*)&login, sizeof(login), 0);
 
-			DataHeader retHeader = {};
 			LoginResult loginRet = {};
-			recv(_sock, (char*)&retHeader, sizeof(retHeader), 0);
 			recv(_sock, (char*)&loginRet, sizeof(loginRet), 0);
 			printf("LoginResult: %d\n", loginRet.result);
 		}
 		else if (0 == strcmp(cmdBuf, "logout")) {
-			LoginOut logout = { "zzr" };
-			DataHeader dh = { sizeof(logout), CMD_LOGIN};
-			send(_sock, (const char*)&dh, sizeof(dh), 0);
+			LogOut logout;
+			strcpy(logout.userName, "zzr");
 			send(_sock, (const char*)&logout, sizeof(logout), 0);
 
-			DataHeader retHeader = {};
-			LoginOutResult logoutRet = {};
-			recv(_sock, (char*)&retHeader, sizeof(retHeader), 0);
+			LogOutResult logoutRet = {};
 			recv(_sock, (char*)&logoutRet, sizeof(logoutRet), 0);
 			printf("LoginOutResult: %d\n", logoutRet.result);
 		}
