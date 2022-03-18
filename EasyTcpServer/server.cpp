@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <WinSock2.h>
 #include <stdio.h>
+#include <vector>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -55,6 +56,50 @@ struct LoginResult : public DataHeader {
 	int result;
 };
 
+std::vector<SOCKET> g_clients;
+
+
+int processor(SOCKET _cSock) {
+	char szRecv[1024] = {};
+	int nLen = recv(_cSock, szRecv, sizeof(DataHeader), 0);
+	DataHeader* header = (DataHeader*)szRecv;
+
+	if (nLen <= 0) {
+		printf("客户端已退出，请求结束.\n");
+		return -1;
+	}
+
+	switch (header->cmd) {
+	case CMD_LOGIN: {
+		recv(_cSock, szRecv + sizeof(DataHeader), header->dataLength - sizeof(DataHeader), 0);
+		Login* login = (Login*)szRecv;
+		printf("收到命令: CMD_LOGIN 数据长度：%d 姓名：%s 密码：%s\n",
+			login->dataLength, login->userName, login->passWord);
+		// 忽略合法性判断
+		LoginResult ret;
+		send(_cSock, (const char*)&ret, sizeof(LoginResult), 0);
+		break;
+	}
+	case CMD_LOGOUT: {
+		recv(_cSock, szRecv + sizeof(DataHeader), header->dataLength - sizeof(DataHeader), 0);
+		LogOut* logOut = (LogOut*)szRecv;
+		printf("收到命令: CMD_LOGOUT 数据长度：%d 姓名：%s\n",
+			logOut->dataLength, logOut->userName);
+		// 忽略合法性判断
+		LogOutResult ret;
+		send(_cSock, (const char*)&ret, sizeof(LogOutResult), 0);
+		break;
+	}
+	default: {
+		DataHeader header = { 0, CMD_ERROR };
+		send(_cSock, (const char*)&header, sizeof(DataHeader), 0);
+		break;
+	}
+	}
+
+	return 1;
+}
+
 int main() {
 	WORD ver = MAKEWORD(2, 2);
 	WSADATA dat;
@@ -82,54 +127,61 @@ int main() {
 		printf("监听网络端口成功\n");
 	}
 
-	// accept
-	sockaddr_in clientAddr = {};
-	int nAddrLen = sizeof(sockaddr_in);
-	SOCKET _cSock = INVALID_SOCKET;
-	_cSock = accept(_sock, (sockaddr*)&clientAddr, &nAddrLen);
-	if (INVALID_SOCKET == _cSock) {
-		printf("ERROR: 接收到无效客户端SOCKET...\n");
-	}
-	printf("新客户端加入:socket = %d, IP = %s \n", (int)_sock, inet_ntoa(clientAddr.sin_addr));
-
 	while (true) {
-		char szRecv[1024] = {};
-		int nLen = recv(_cSock, szRecv, sizeof(DataHeader), 0);
-		DataHeader* header = (DataHeader*)szRecv;
+		fd_set fdRead;
+		fd_set fdWrite;
+		fd_set fdExp;
 
-		if (nLen <= 0) {
-			printf("客户端已退出，请求结束.\n");
-			break;
+		FD_ZERO(&fdRead);
+		FD_ZERO(&fdWrite);
+		FD_ZERO(&fdExp);
+
+		FD_SET(_sock, &fdRead);
+		FD_SET(_sock, &fdWrite);
+		FD_SET(_sock, &fdExp);
+
+		for (int n = (int)g_clients.size() - 1; n >= 0; --n) {
+			FD_SET(g_clients[n], &fdRead);
 		}
 		
-		switch (header->cmd) {
-		case CMD_LOGIN: {
-			recv(_cSock, szRecv + sizeof(DataHeader), header->dataLength - sizeof(DataHeader), 0);
-			Login* login = (Login*)szRecv;
-			printf("收到命令: CMD_LOGIN 数据长度：%d 姓名：%s 密码：%s\n", 
-				login->dataLength, login->userName, login->passWord);
-			// 忽略合法性判断
-			LoginResult ret;
-			send(_cSock, (const char*)&ret, sizeof(LoginResult), 0);
+		// nfds 是一个整数值，是指fd_set集合中所有描述符(socket)的范围，而不是数量
+		// 即是所有文件描述符的最大值+1，在windows中该参数无作用
+		int ret = select(_sock + 1, &fdRead, &fdWrite, &fdExp, NULL);
+		if (ret < 0) {
+			printf("服务端已退出.\n");
 			break;
 		}
-		case CMD_LOGOUT: {
-			recv(_cSock, szRecv + sizeof(DataHeader), header->dataLength - sizeof(DataHeader), 0);
-			LogOut *logOut = (LogOut*)szRecv;
-			printf("收到命令: CMD_LOGOUT 数据长度：%d 姓名：%s\n",
-				logOut->dataLength, logOut->userName);
-			// 忽略合法性判断
-			LogOutResult ret;
-			send(_cSock, (const char*)&ret, sizeof(LogOutResult), 0);
-			break;
+
+		if (FD_ISSET(_sock, &fdRead)) {
+			FD_CLR(_sock, &fdRead);
+
+			// accept
+			sockaddr_in clientAddr = {};
+			int nAddrLen = sizeof(sockaddr_in);
+			SOCKET _cSock = INVALID_SOCKET;
+			_cSock = accept(_sock, (sockaddr*)&clientAddr, &nAddrLen);
+			if (INVALID_SOCKET == _cSock) {
+				printf("ERROR: 接收到无效客户端SOCKET...\n");
+			}
+
+			g_clients.push_back(_cSock);
+			printf("新客户端加入:socket = %d, IP = %s \n", (int)_sock, inet_ntoa(clientAddr.sin_addr));
 		}
-		default: {
-			DataHeader header = { 0, CMD_ERROR };
-			send(_cSock, (const char*)&header, sizeof(DataHeader), 0);
-			break;
-		}	
+
+		for (int n = 0; n < fdRead.fd_count; ++n) {
+			if (-1 == processor(fdRead.fd_array[n])) {
+				auto iter = find(g_clients.begin(), g_clients.end(), fdRead.fd_array[n]);
+				if (iter != g_clients.end()) {
+					g_clients.erase(iter);
+				}
+			}
 		}
 	}
+
+	for (size_t n = g_clients.size() - 1; n >= 0; --n) {
+		closesocket(g_clients[n]);
+	}
+
 	// close
 	closesocket(_sock);
 	
