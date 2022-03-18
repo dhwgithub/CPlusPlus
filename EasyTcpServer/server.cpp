@@ -144,9 +144,10 @@ int main() {
 			FD_SET(g_clients[n], &fdRead);
 		}
 		
+		timeval t = { 0, 0 };
 		// nfds 是一个整数值，是指fd_set集合中所有描述符(socket)的范围，而不是数量
 		// 即是所有文件描述符的最大值+1，在windows中该参数无作用
-		int ret = select(_sock + 1, &fdRead, &fdWrite, &fdExp, NULL);
+		int ret = select(_sock + 1, &fdRead, &fdWrite, &fdExp, &t);
 		if (ret < 0) {
 			printf("服务端已退出.\n");
 			break;
