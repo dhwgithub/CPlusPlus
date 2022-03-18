@@ -13,7 +13,8 @@ enum CMD {
 	CMD_LOGIN_RESULT,
 	CMD_LOGOUT,
 	CMD_LOGOUT_RESULT,
-	CMD_ERROR
+	CMD_ERROR,
+	CMD_NEW_USER_JOIN
 };
 
 struct DataHeader {
@@ -56,6 +57,15 @@ struct LoginResult : public DataHeader {
 	int result;
 };
 
+struct NewUserJoin : public DataHeader {
+	NewUserJoin() {
+		dataLength = sizeof(NewUserJoin);
+		cmd = CMD_NEW_USER_JOIN;
+		sock = 0;
+	}
+	int sock;
+};
+
 std::vector<SOCKET> g_clients;
 
 
@@ -73,8 +83,8 @@ int processor(SOCKET _cSock) {
 	case CMD_LOGIN: {
 		recv(_cSock, szRecv + sizeof(DataHeader), header->dataLength - sizeof(DataHeader), 0);
 		Login* login = (Login*)szRecv;
-		printf("收到命令: CMD_LOGIN 数据长度：%d 姓名：%s 密码：%s\n",
-			login->dataLength, login->userName, login->passWord);
+		printf("收到客户端<socket=%d>请求: CMD_LOGIN 数据长度：%d 姓名：%s 密码：%s\n",
+			_cSock, login->dataLength, login->userName, login->passWord);
 		// 忽略合法性判断
 		LoginResult ret;
 		send(_cSock, (const char*)&ret, sizeof(LoginResult), 0);
@@ -83,8 +93,8 @@ int processor(SOCKET _cSock) {
 	case CMD_LOGOUT: {
 		recv(_cSock, szRecv + sizeof(DataHeader), header->dataLength - sizeof(DataHeader), 0);
 		LogOut* logOut = (LogOut*)szRecv;
-		printf("收到命令: CMD_LOGOUT 数据长度：%d 姓名：%s\n",
-			logOut->dataLength, logOut->userName);
+		printf("收到客户端<socket=%d>请求: CMD_LOGOUT 数据长度：%d 姓名：%s\n",
+			_cSock, logOut->dataLength, logOut->userName);
 		// 忽略合法性判断
 		LogOutResult ret;
 		send(_cSock, (const char*)&ret, sizeof(LogOutResult), 0);
@@ -144,7 +154,7 @@ int main() {
 			FD_SET(g_clients[n], &fdRead);
 		}
 		
-		timeval t = { 0, 0 };
+		timeval t = { 1, 0 };
 		// nfds 是一个整数值，是指fd_set集合中所有描述符(socket)的范围，而不是数量
 		// 即是所有文件描述符的最大值+1，在windows中该参数无作用
 		int ret = select(_sock + 1, &fdRead, &fdWrite, &fdExp, &t);
@@ -164,9 +174,15 @@ int main() {
 			if (INVALID_SOCKET == _cSock) {
 				printf("ERROR: 接收到无效客户端SOCKET...\n");
 			}
-
-			g_clients.push_back(_cSock);
-			printf("新客户端加入:socket = %d, IP = %s \n", (int)_sock, inet_ntoa(clientAddr.sin_addr));
+			else {
+				for (int n = (int)g_clients.size() - 1; n >= 0; --n) {
+					NewUserJoin userJoin;
+					userJoin.sock = _cSock;
+					send(g_clients[n], (const char*)&userJoin, sizeof(NewUserJoin), 0);
+				}
+				g_clients.push_back(_cSock);
+				printf("新客户端加入:socket = %d, IP = %s \n", (int)_cSock, inet_ntoa(clientAddr.sin_addr));
+			} 
 		}
 
 		for (int n = 0; n < fdRead.fd_count; ++n) {
@@ -177,6 +193,8 @@ int main() {
 				}
 			}
 		}
+
+		printf("空闲时间处理其他业务...\n");
 	}
 
 	for (size_t n = g_clients.size() - 1; n >= 0; --n) {
