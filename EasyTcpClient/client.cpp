@@ -14,7 +14,8 @@ enum CMD {
 	CMD_LOGIN_RESULT,
 	CMD_LOGOUT,
 	CMD_LOGOUT_RESULT,
-	CMD_ERROR
+	CMD_ERROR,
+	CMD_NEW_USER_JOIN
 };
 
 struct DataHeader {
@@ -57,6 +58,51 @@ struct LoginResult : public DataHeader {
 	int result;
 };
 
+struct NewUserJoin : public DataHeader {
+	NewUserJoin() {
+		dataLength = sizeof(NewUserJoin);
+		cmd = CMD_NEW_USER_JOIN;
+		sock = 0;
+	}
+	int sock;
+};
+
+
+int processor(SOCKET _Sock) {
+	char szRecv[1024] = {};
+	int nLen = recv(_Sock, szRecv, sizeof(DataHeader), 0);
+	DataHeader* header = (DataHeader*)szRecv;
+
+	if (nLen <= 0) {
+		printf("与服务器断开连接，任务结束.\n");
+		return -1;
+	}
+
+	switch (header->cmd) {
+	case CMD_LOGIN_RESULT: {
+		recv(_Sock, szRecv + sizeof(DataHeader), header->dataLength - sizeof(DataHeader), 0);
+		LoginResult* login = (LoginResult*)szRecv;
+		printf("收到服务端消息: CMD_LOGIN_RESULT, 数据长度：%d\n", login->dataLength);
+		break;
+	}
+	case CMD_LOGOUT_RESULT: {
+		recv(_Sock, szRecv + sizeof(DataHeader), header->dataLength - sizeof(DataHeader), 0);
+		LogOutResult* logout = (LogOutResult*)szRecv;
+		printf("收到服务端消息: CMD_LOGOUT_RESULT, 数据长度：%d\n", logout->dataLength);
+		break;
+	}
+	case CMD_NEW_USER_JOIN: {
+		recv(_Sock, szRecv + sizeof(DataHeader), header->dataLength - sizeof(DataHeader), 0);
+		NewUserJoin* userJoin = (NewUserJoin*)szRecv;
+		printf("收到服务端消息: CMD_LOGOUT_RESULT, 数据长度：%d\n", userJoin->dataLength);
+		break;
+	}
+	}
+
+	return 1;
+}
+
+
 int main() {
 	WORD ver = MAKEWORD(2, 2);
 	WSADATA dat;
@@ -84,33 +130,33 @@ int main() {
 	}
 
 	while (true) {
-		char cmdBuf[128] = {};
-		scanf("%s", &cmdBuf);
-		if (0 == strcmp(cmdBuf, "exit")) {
+		fd_set fdReads;
+		FD_ZERO(&fdReads);
+		FD_SET(_sock, &fdReads);  // 加入集合
+		timeval t = { 1, 0 };
+		int ret = select(_sock, &fdReads, NULL, NULL, &t);
+		if (ret < 0) {
+			printf("select 任务结束\n");
 			break;
 		}
-		else if (0 == strcmp(cmdBuf, "login")) {
-			Login login;
-			strcpy(login.userName, "zzr");
-			strcpy(login.passWord, "999");
-			send(_sock, (const char*)&login, sizeof(login), 0);
 
-			LoginResult loginRet = {};
-			recv(_sock, (char*)&loginRet, sizeof(loginRet), 0);
-			printf("LoginResult: %d\n", loginRet.result);
-		}
-		else if (0 == strcmp(cmdBuf, "logout")) {
-			LogOut logout;
-			strcpy(logout.userName, "zzr");
-			send(_sock, (const char*)&logout, sizeof(logout), 0);
+		// 判断是否在集合中
+		if (FD_ISSET(_sock, &fdReads)) {
+			FD_CLR(_sock, &fdReads);
 
-			LogOutResult logoutRet = {};
-			recv(_sock, (char*)&logoutRet, sizeof(logoutRet), 0);
-			printf("LoginOutResult: %d\n", logoutRet.result);
+			if (-1 == processor(_sock)) {
+				printf("select 任务结束\n");
+				break;
+			}
 		}
-		else {
-			printf("不支持的命令，请重新输入.\n");
-		}
+
+		printf("空闲时间处理其他业务\n");
+
+		Login login;
+		strcpy(login.userName, "zzr");
+		strcpy(login.passWord, "zzr");
+		send(_sock, (const char*)&login, sizeof(login), 0);
+		// Sleep(1000);
 	}
 	
 	// close
