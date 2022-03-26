@@ -3,22 +3,21 @@
 #define _CRT_SECURE_NO_WARNINGS
 
 #ifdef _WIN32 
-  #include <windows.h>
-  #include <WinSock2.h>
+	#include <windows.h>
+	#include <WinSock2.h>
+	#pragma comment(lib, "ws2_32.lib")
 #else
-  #include <unistd.h>
-  #include <arpa/inet.h>
-  #include <string.h>
+	#include <unistd.h>
+	#include <arpa/inet.h>
+	#include <string.h>
   
-  #define SOCKET int
-  #define INVALID_SOCKET  (SOCKET)(~0)
-  #define SOCKET_ERROR            (-1)
+	#define SOCKET int
+	#define INVALID_SOCKET  (SOCKET)(~0)
+	#define SOCKET_ERROR            (-1)
 #endif
 
 #include <stdio.h>
 #include <thread>
-
-#pragma comment(lib, "ws2_32.lib")
 
 
 enum CMD {
@@ -86,7 +85,7 @@ int processor(SOCKET _Sock) {
 	DataHeader* header = (DataHeader*)szRecv;
 
 	if (nLen <= 0) {
-		printf("与服务器断开连接，任务结束.\n");
+		printf("Connect break with server，word end.\n");
 		return -1;
 	}
 
@@ -94,24 +93,24 @@ int processor(SOCKET _Sock) {
 	case CMD_LOGIN_RESULT: {
 		recv(_Sock, szRecv + sizeof(DataHeader), header->dataLength - sizeof(DataHeader), 0);
 		LoginResult* login = (LoginResult*)szRecv;
-		printf("收到服务端消息: CMD_LOGIN_RESULT, 数据长度：%d\n", login->dataLength);
+		printf("Accept server message: CMD_LOGIN_RESULT, data length: %d\n", login->dataLength);
 		break;
 	}
 	case CMD_LOGOUT_RESULT: {
 		recv(_Sock, szRecv + sizeof(DataHeader), header->dataLength - sizeof(DataHeader), 0);
 		LogOutResult* logout = (LogOutResult*)szRecv;
-		printf("收到服务端消息: CMD_LOGOUT_RESULT, 数据长度：%d\n", logout->dataLength);
+		printf("Accept server message: CMD_LOGOUT_RESULT, data length: %d\n", logout->dataLength);
 		break;
 	}
 	case CMD_NEW_USER_JOIN: {
 		recv(_Sock, szRecv + sizeof(DataHeader), header->dataLength - sizeof(DataHeader), 0);
 		NewUserJoin* userJoin = (NewUserJoin*)szRecv;
-		printf("收到服务端消息: CMD_LOGOUT_RESULT, 数据长度：%d\n", userJoin->dataLength);
+		printf("Accept server message: CMD_LOGOUT_RESULT, data length: %d\n", userJoin->dataLength);
 		break;
 	}
 	}
 
-	return 1;
+	return 0;
 }
 
 bool g_bRun = true;
@@ -122,7 +121,7 @@ void cmdThread(SOCKET sock) {
 		scanf("%s", cmdBuf);
 		if (0 == strcmp(cmdBuf, "exit")) {
 			g_bRun = false;
-			printf("退出cmdThread线程\n");
+			printf("Exit cmdThread function\n");
 			break;
 		}
 		else if (0 == strcmp(cmdBuf, "login")) {
@@ -137,7 +136,7 @@ void cmdThread(SOCKET sock) {
 			send(sock, (const char*)&logout, sizeof(logout), 0);
 		}
 		else {
-			printf("不支持的命令\n");
+			printf("Not suppord cmd\n");
 		}
 	}
 }
@@ -152,15 +151,15 @@ int main() {
 	// 1.建立socket 套接字
 	SOCKET _sock = socket(AF_INET, SOCK_STREAM, 0);
 	if (INVALID_SOCKET == _sock) {
-		printf("ERROR: 建立客户端SOCKET失败...\n");
+		printf("ERROR: build client SOCKET failure...\n");
 	}
 	else {
-		printf("建立客户端SOCKET成功...\n");
+		printf("Build cliend SOCKET success...\n");
 	}
 	// connect
 	sockaddr_in _sin = {};
 	_sin.sin_family = AF_INET;
-	_sin.sin_port = htons(9999);
+	_sin.sin_port = htons(9998);
 
 #ifdef _WIN32
 	_sin.sin_addr.S_un.S_addr = inet_addr("127.0.0.1");
@@ -170,10 +169,10 @@ int main() {
 
 	int ret = connect(_sock, (sockaddr*)&_sin, sizeof(sockaddr_in));
 	if (SOCKET_ERROR == ret) {
-		printf("ERROR: 连接失败...\n");
+		printf("ERROR: connect failure...\n");
 	}
 	else {
-		printf("连接成功...\n");
+		printf("Connect server success...\n");
 	}
 
 	// 启动线程
@@ -187,7 +186,7 @@ int main() {
 		timeval t = { 1, 0 };
 		int ret = select(_sock + 1, &fdReads, NULL, NULL, &t);
 		if (ret < 0) {
-			printf("select 任务结束\n");
+			printf("Select work end\n");
 			break;
 		}
 
@@ -196,21 +195,12 @@ int main() {
 			FD_CLR(_sock, &fdReads);
 
 			if (-1 == processor(_sock)) {
-				printf("select 任务结束\n");
+				printf("Select work end\n");
 				break;
 			}
 		}
-
-		// printf("空闲时间处理其他业务\n");
-
-		// Sleep(1000);
 	}
 	
-	// close
-	
-
-	printf("客户端已退出");
-	getchar();
 	
 #ifdef _WIN32
 	closesocket(_sock);
@@ -219,6 +209,8 @@ int main() {
 #else
 	close(_sock);
 #endif
-
+	
+	printf("Client exit already\n");
+	getchar();
 	return 0;
 }
