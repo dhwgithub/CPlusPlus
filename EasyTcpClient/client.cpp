@@ -2,8 +2,19 @@
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
 
-#include <windows.h>
-#include <WinSock2.h>
+#ifdef _WIN32 
+  #include <windows.h>
+  #include <WinSock2.h>
+#else
+  #include <unistd.h>
+  #include <arpa/inet.h>
+  #include <string.h>
+  
+  #define SOCKET int
+  #define INVALID_SOCKET  (SOCKET)(~0)
+  #define SOCKET_ERROR            (-1)
+#endif
+
 #include <stdio.h>
 #include <thread>
 
@@ -71,7 +82,7 @@ struct NewUserJoin : public DataHeader {
 
 int processor(SOCKET _Sock) {
 	char szRecv[1024] = {};
-	int nLen = recv(_Sock, szRecv, sizeof(DataHeader), 0);
+	int nLen = (int)recv(_Sock, szRecv, sizeof(DataHeader), 0);
 	DataHeader* header = (DataHeader*)szRecv;
 
 	if (nLen <= 0) {
@@ -132,9 +143,11 @@ void cmdThread(SOCKET sock) {
 }
 
 int main() {
+#ifdef _WIN32
 	WORD ver = MAKEWORD(2, 2);
 	WSADATA dat;
 	WSAStartup(ver, &dat);
+#endif
 
 	// 1.建立socket 套接字
 	SOCKET _sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -148,7 +161,13 @@ int main() {
 	sockaddr_in _sin = {};
 	_sin.sin_family = AF_INET;
 	_sin.sin_port = htons(9999);
+
+#ifdef _WIN32
 	_sin.sin_addr.S_un.S_addr = inet_addr("127.0.0.1");
+#else
+	_sin.sin_addr.s_addr = inet_addr("192.168.182.1");
+#endif
+
 	int ret = connect(_sock, (sockaddr*)&_sin, sizeof(sockaddr_in));
 	if (SOCKET_ERROR == ret) {
 		printf("ERROR: 连接失败...\n");
@@ -166,7 +185,7 @@ int main() {
 		FD_ZERO(&fdReads);
 		FD_SET(_sock, &fdReads);  // 加入集合
 		timeval t = { 1, 0 };
-		int ret = select(_sock, &fdReads, NULL, NULL, &t);
+		int ret = select(_sock + 1, &fdReads, NULL, NULL, &t);
 		if (ret < 0) {
 			printf("select 任务结束\n");
 			break;
@@ -188,11 +207,18 @@ int main() {
 	}
 	
 	// close
-	closesocket(_sock);
+	
 
 	printf("客户端已退出");
 	getchar();
+	
+#ifdef _WIN32
+	closesocket(_sock);
 	// 清除win socket 环境
 	WSACleanup();
+#else
+	close(_sock);
+#endif
+
 	return 0;
 }
