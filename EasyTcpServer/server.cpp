@@ -1,12 +1,21 @@
-#define WIN32_LEAN_AND_MEAN
-#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#ifdef _WIN32 
+	#define _WINSOCK_DEPRECATED_NO_WARNINGS
+	#define WIN32_LEAN_AND_MEAN
+	#include <windows.h>
+	#include <WinSock2.h>
+	#pragma comment(lib, "ws2_32.lib")
+#else 
+	#include <unistd.h>
+	#include <arpa/inet.h>
+	#include <string.h>
+	
+	#define SOCKET int
+	#define INVALID_SOCKET  (SOCKET)(~0)
+	#define SOCKET_ERROR            (-1)
+#endif
 
-#include <windows.h>
-#include <WinSock2.h>
 #include <stdio.h>
 #include <vector>
-
-#pragma comment(lib, "ws2_32.lib")
 
 enum CMD {
 	CMD_LOGIN,
@@ -68,14 +77,13 @@ struct NewUserJoin : public DataHeader {
 
 std::vector<SOCKET> g_clients;
 
-
 int processor(SOCKET _cSock) {
 	char szRecv[1024] = {};
-	int nLen = recv(_cSock, szRecv, sizeof(DataHeader), 0);
+	int nLen = (int)recv(_cSock, szRecv, sizeof(DataHeader), 0);
 	DataHeader* header = (DataHeader*)szRecv;
 
 	if (nLen <= 0) {
-		printf("客户端已退出，请求结束.\n");
+		printf("Client exit already, request end.\n");
 		return -1;
 	}
 
@@ -83,7 +91,7 @@ int processor(SOCKET _cSock) {
 	case CMD_LOGIN: {
 		recv(_cSock, szRecv + sizeof(DataHeader), header->dataLength - sizeof(DataHeader), 0);
 		Login* login = (Login*)szRecv;
-		printf("收到客户端<socket=%d>请求: CMD_LOGIN 数据长度：%d 姓名：%s 密码：%s\n",
+		printf("Accept client <socket=%d> request: CMD_LOGIN data length: %d name: %s password: %s\n",
 			_cSock, login->dataLength, login->userName, login->passWord);
 		// 忽略合法性判断
 		LoginResult ret;
@@ -93,7 +101,7 @@ int processor(SOCKET _cSock) {
 	case CMD_LOGOUT: {
 		recv(_cSock, szRecv + sizeof(DataHeader), header->dataLength - sizeof(DataHeader), 0);
 		LogOut* logOut = (LogOut*)szRecv;
-		printf("收到客户端<socket=%d>请求: CMD_LOGOUT 数据长度：%d 姓名：%s\n",
+		printf("Accept client <socket=%d> request: CMD_LOGOUT data length: %d name: %s\n",
 			_cSock, logOut->dataLength, logOut->userName);
 		// 忽略合法性判断
 		LogOutResult ret;
@@ -107,34 +115,43 @@ int processor(SOCKET _cSock) {
 	}
 	}
 
-	return 1;
+	return 0;
 }
 
 int main() {
+#ifdef _WIN32 
 	WORD ver = MAKEWORD(2, 2);
 	WSADATA dat;
 	WSAStartup(ver, &dat);
+#endif
 
 	// 1.建立socket 套接字
 	SOCKET _sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	// 2.bind端口号
 	sockaddr_in _sin = {};
 	_sin.sin_family = AF_INET;
-	_sin.sin_port = htons(9999);
+	_sin.sin_port = htons(9998);
+	
+#ifdef _WIN32
 	_sin.sin_addr.S_un.S_addr = INADDR_ANY; // inet_addr("127.0.0.1");
+#else
+	_sin.sin_addr.s_addr = INADDR_ANY; // inet_addr("127.0.0.1");
+#endif
+	
 	if (SOCKET_ERROR == bind(_sock, (sockaddr*)&_sin, sizeof(_sin))) {
-		printf("ERROR: 绑定端口号失败\n");
+		printf("ERROR: bind port failure\n");
+		return 0;
 	}
 	else {
-		printf("绑定端口号成功\n");
+		printf("bind port success\n");
 	}
 
 	// 3.监听网络端口
 	if (SOCKET_ERROR == listen(_sock, 5)) {
-		printf("ERROR: 监听网络端口失败\n");
+		printf("ERROR: listen network port failure\n");
 	}
 	else {
-		printf("监听网络端口成功\n");
+		printf("Listen network port success\n");
 	}
 
 	while (true) {
@@ -149,17 +166,21 @@ int main() {
 		FD_SET(_sock, &fdRead);
 		FD_SET(_sock, &fdWrite);
 		FD_SET(_sock, &fdExp);
-
+		
+		SOCKET maxSock = _sock;
 		for (int n = (int)g_clients.size() - 1; n >= 0; --n) {
 			FD_SET(g_clients[n], &fdRead);
+			if (maxSock < g_clients[n]) {
+				maxSock = g_clients[n];
+			}
 		}
 		
 		timeval t = { 1, 0 };
 		// nfds 是一个整数值，是指fd_set集合中所有描述符(socket)的范围，而不是数量
 		// 即是所有文件描述符的最大值+1，在windows中该参数无作用
-		int ret = select(_sock + 1, &fdRead, &fdWrite, &fdExp, &t);
+		int ret = select(maxSock + 1, &fdRead, &fdWrite, &fdExp, &t);
 		if (ret < 0) {
-			printf("服务端已退出.\n");
+			printf("Server exit.\n");
 			break;
 		}
 
@@ -170,9 +191,15 @@ int main() {
 			sockaddr_in clientAddr = {};
 			int nAddrLen = sizeof(sockaddr_in);
 			SOCKET _cSock = INVALID_SOCKET;
+			
+#ifdef _WIN32
 			_cSock = accept(_sock, (sockaddr*)&clientAddr, &nAddrLen);
+#else 
+			_cSock = accept(_sock, (sockaddr*)&clientAddr, (socklen_t*)&nAddrLen);
+#endif
+
 			if (INVALID_SOCKET == _cSock) {
-				printf("ERROR: 接收到无效客户端SOCKET...\n");
+				printf("ERROR: accept invalid client SOCKET...\n");
 			}
 			else {
 				for (int n = (int)g_clients.size() - 1; n >= 0; --n) {
@@ -181,31 +208,38 @@ int main() {
 					send(g_clients[n], (const char*)&userJoin, sizeof(NewUserJoin), 0);
 				}
 				g_clients.push_back(_cSock);
-				printf("新客户端加入:socket = %d, IP = %s \n", (int)_cSock, inet_ntoa(clientAddr.sin_addr));
+				printf("New client join:socket = %d, IP = %s \n", (int)_cSock, inet_ntoa(clientAddr.sin_addr));
 			} 
 		}
-
-		for (int n = 0; n < fdRead.fd_count; ++n) {
-			if (-1 == processor(fdRead.fd_array[n])) {
-				auto iter = find(g_clients.begin(), g_clients.end(), fdRead.fd_array[n]);
-				if (iter != g_clients.end()) {
-					g_clients.erase(iter);
+		
+		for (int n = (int)g_clients.size() - 1; n >= 0; --n) {
+			if (FD_ISSET(g_clients[n], &fdRead)) {
+				if (-1 == processor(g_clients[n])) {
+					auto iter = g_clients.begin() + n;
+					if (iter != g_clients.end()) {
+						g_clients.erase(iter);
+					}
 				}
 			}
 		}
 
-		printf("空闲时间处理其他业务...\n");
+		printf("Free time handle others work...\n");
 	}
 
-	for (size_t n = g_clients.size() - 1; n >= 0; --n) {
+#ifdef _WIN32 
+	for (int n = (int)g_clients.size() - 1; n >= 0; --n) {
 		closesocket(g_clients[n]);
 	}
-
-	// close
 	closesocket(_sock);
-	
-	printf("服务端已退出");
-	getchar();
 	WSACleanup();
+#else 
+	for (int n = (int)g_clients.size() - 1; n >= 0; --n) {
+		close(g_clients[n]);
+	}
+	close(_sock);
+#endif
+
+	printf("Server exit already");
+	getchar();
 	return 0;
 }
